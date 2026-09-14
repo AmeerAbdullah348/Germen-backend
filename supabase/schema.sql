@@ -57,3 +57,85 @@ create policy "Users can insert own word progress" on public.word_progress
   for insert with check (auth.uid() = user_id);
 create policy "Users can update own word progress" on public.word_progress
   for update using (auth.uid() = user_id);
+
+-- One row per (user, item type, item id): SM-2 state for non-vocab content
+-- (grammar, and later listening/reading/writing). Kept as a separate table
+-- from word_progress rather than merging them — zero migration risk to
+-- existing vocab progress, same SM-2 field shape reused as-is.
+create table if not exists public.item_progress (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  item_type text not null,
+  item_id text not null,
+  repetitions integer not null default 0,
+  ease_factor numeric not null default 2.5,
+  interval_days integer not null default 0,
+  due_date timestamptz not null default now(),
+  last_result text,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, item_type, item_id)
+);
+
+alter table public.item_progress enable row level security;
+
+create policy "Users can view own item progress" on public.item_progress
+  for select using (auth.uid() = user_id);
+create policy "Users can insert own item progress" on public.item_progress
+  for insert with check (auth.uid() = user_id);
+create policy "Users can update own item progress" on public.item_progress
+  for update using (auth.uid() = user_id);
+
+-- Append-only log of wrong answers, generic across content types, so the
+-- Mistakes page can show "you answered X, correct was Y" and let the user
+-- practice flagged items again. Never updated after insert.
+create table if not exists public.mistakes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  item_type text not null,
+  item_id text not null,
+  unit_or_topic_id text,
+  user_answer text,
+  correct_answer text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.mistakes enable row level security;
+
+create policy "Users can view own mistakes" on public.mistakes
+  for select using (auth.uid() = user_id);
+create policy "Users can insert own mistakes" on public.mistakes
+  for insert with check (auth.uid() = user_id);
+
+-- One row per (user, achievement): unlocked badges. achievement_id matches
+-- a static id in a frontend achievements catalog (not built yet — table
+-- shape is low-risk enough to add now so later phases don't need a migration).
+create table if not exists public.achievements (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  achievement_id text not null,
+  unlocked_at timestamptz not null default now(),
+  primary key (user_id, achievement_id)
+);
+
+alter table public.achievements enable row level security;
+
+create policy "Users can view own achievements" on public.achievements
+  for select using (auth.uid() = user_id);
+create policy "Users can insert own achievements" on public.achievements
+  for insert with check (auth.uid() = user_id);
+
+-- One row per placement test attempt: estimated CEFR level + raw per-section
+-- scores. Purely a recommendation record — never auto-mutates word_progress
+-- or item_progress, so retaking it can't destroy existing progress.
+create table if not exists public.placement_results (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  estimated_level text not null,
+  raw_scores jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.placement_results enable row level security;
+
+create policy "Users can view own placement results" on public.placement_results
+  for select using (auth.uid() = user_id);
+create policy "Users can insert own placement results" on public.placement_results
+  for insert with check (auth.uid() = user_id);
