@@ -139,3 +139,23 @@ create policy "Users can view own placement results" on public.placement_results
   for select using (auth.uid() = user_id);
 create policy "Users can insert own placement results" on public.placement_results
   for insert with check (auth.uid() = user_id);
+
+-- One row per (user, word) saved to their vocabulary favorites. word_id can
+-- reference either a unit vocab id or a vocabulary/extra-vocab.json id —
+-- both live in the same id namespace as word_progress, so no join is needed
+-- to resolve a favorite back to word_progress's SM-2 state.
+create table if not exists public.favorites (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  word_id text not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, word_id)
+);
+
+alter table public.favorites enable row level security;
+
+create policy "Users can view own favorites" on public.favorites
+  for select using (auth.uid() = user_id);
+create policy "Users can insert own favorites" on public.favorites
+  for insert with check (auth.uid() = user_id);
+create policy "Users can delete own favorites" on public.favorites
+  for delete using (auth.uid() = user_id);
